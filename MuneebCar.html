@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MUNEEB CAR GAME</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.4.2/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; }
+    #gameContainer { position:relative; }
+    #videoFeed { position:absolute; top:10px; left:10px; width:150px; border:2px solid #fff; border-radius:8px; }
+  </style>
+</head>
+<body>
+<div id="gameContainer">
+  <video id="videoFeed" autoplay></video>
+</div>
+
+<script>
+let carX, carY;
+let obstacles = [];
+let gameState = "start"; // "start", "play", "over"
+let score = 0;
+let handX = null;
+let smoothedX = null;
+let fistDetected = false;
+let lastFistTime = 0;
+
+// Car size
+let carW = 50;
+let carH = 80;
+
+let videoElement;
+
+function setup() {
+  let cnv = createCanvas(400, 600);
+  cnv.parent("gameContainer");
+  carY = height - 150;  // car slightly above bottom
+  
+  // Webcam setup
+  videoElement = document.getElementById("videoFeed");
+
+  const hands = new Hands({locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+  }});
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 0,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults((results) => {
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      let lm = results.multiHandLandmarks[0];
+      let indexTip = lm[8];  // Index finger tip
+      let wrist = lm[0];     // Wrist
+
+      // Invert X (because webcam is mirrored)
+      handX = width - (indexTip.x * width);
+
+      // Detect "fist" → index tip close to wrist
+      let dx = (indexTip.x - wrist.x) * width;
+      let dy = (indexTip.y - wrist.y) * height;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+
+      if (dist < 60) { // threshold for fist
+        fistDetected = true;
+      } else {
+        fistDetected = false;
+      }
+    }
+  });
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    width: 400,
+    height: 300
+  });
+  camera.start();
+}
+
+function draw() {
+  background(30);
+
+  // Fist = start or restart
+  if (fistDetected && millis() - lastFistTime > 1000) {
+    if (gameState === "start" || gameState === "over") {
+      startGame();
+    }
+    lastFistTime = millis();
+  }
+
+  if (gameState === "start") {
+    fill(255);
+    textSize(32);
+    textAlign(CENTER, CENTER);
+    text("MUNEEB CAR GAME", width/2, height/2 - 40);
+    textSize(20);
+    text("Make a Fist to Start", width/2, height/2 + 20);
+
+  } else if (gameState === "play") {
+    // Car control with smoothing
+    if (handX !== null) {
+      if (smoothedX === null) smoothedX = handX;
+      smoothedX = lerp(smoothedX, handX, 0.2); // smooth movement
+      carX = smoothedX;
+    } else {
+      carX = width/2;
+    }
+
+    // Draw car
+    fill(0, 200, 255);
+    rect(carX - carW/2, carY, carW, carH, 10);
+
+    // Obstacles
+    if (frameCount % 50 === 0) {
+      obstacles.push({x: random(50, width-50), y: -40, w: 40, h: 40, scored: false});
+    }
+
+    for (let i = obstacles.length-1; i >= 0; i--) {
+      let ob = obstacles[i];
+      fill(255, 80, 80);
+      rect(ob.x, ob.y, ob.w, ob.h, 5);
+      ob.y += 6;
+
+      // Proper overlap collision check (axis-aligned bounding box)
+      if (ob.x < carX + carW/2 &&
+          ob.x + ob.w > carX - carW/2 &&
+          ob.y < carY + carH &&
+          ob.y + ob.h > carY) {
+        gameState = "over";
+      }
+
+      // Score when passed car
+      if (!ob.scored && ob.y > carY + carH) {
+        score++;
+        ob.scored = true;
+      }
+
+      // Remove off screen
+      if (ob.y > height + 50) obstacles.splice(i, 1);
+    }
+
+    // ✅ Score display (top-right)
+    fill(255);
+    textSize(20);
+    textAlign(RIGHT);
+    text("Score: " + score, width - 10, 25);
+
+  } else if (gameState === "over") {
+    fill(255, 50, 50);
+    textSize(32);
+    textAlign(CENTER, CENTER);
+    text("GAME OVER", width/2, height/2 - 40);
+    textSize(20);
+    text("Final Score: " + score, width/2, height/2);
+    text("Make a Fist to Restart", width/2, height/2 + 40);
+  }
+}
+
+function startGame() {
+  obstacles = [];
+  score = 0;
+  smoothedX = null;
+  handX = null;
+  carX = width/2;
+  gameState = "play";
+}
+</script>
+</body>
+</html>
